@@ -3,8 +3,7 @@ import qrcode
 import os
 import uuid
 import logging
-from qiniu import Auth, put_file
-from qiniu.services.storage.uploader import put_data
+from qiniu import Auth, put_file, BucketManager
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from datetime import datetime
@@ -49,9 +48,7 @@ QINIU_PRIVATE_URL_EXPIRE_TIME = int(
 
 # 初始化七牛云认证
 q = Auth(QINIU_ACCESS_KEY, QINIU_SECRET_KEY)
-
-# 简单的文件信息存储（生产环境建议使用数据库）
-file_info_storage = {}
+bucket_manager = BucketManager(q)
 
 
 def allowed_file(filename):
@@ -97,6 +94,57 @@ def generate_private_url(base_url, expire_time=None):
     private_url = q.private_download_url(base_url, expires=expire_time)
     logger.info(f"生成的私有URL: {private_url}")
     return private_url
+
+
+def check_file_exists(bucket_name, key):
+    """检查七牛云中文件是否存在"""
+    try:
+        ret, info = bucket_manager.stat(bucket_name, key)
+        if info.status_code == 200:
+            return True, ret
+        else:
+            return False, None
+    except Exception as e:
+        logger.error(f"检查文件存在性失败: {e}")
+        return False, None
+
+
+def find_file_by_id(file_id):
+    """根据文件ID查找文件，尝试不同的扩展名"""
+    # 可能的文件扩展名
+    possible_extensions = list(ALLOWED_EXTENSIONS)
+
+    # 首先检查二维码文件是否存在
+    qrcode_filename = f"qrcodes/{file_id}_qrcode.png"
+    qrcode_exists, _ = check_file_exists(QINIU_BUCKET_NAME, qrcode_filename)
+
+    if not qrcode_exists:
+        logger.info(f"二维码文件不存在: {qrcode_filename}")
+        return None
+
+    logger.info(f"二维码文件存在: {qrcode_filename}")
+
+    # 二维码存在，现在查找对应的媒体文件
+    for ext in possible_extensions:
+        media_filename = f"media/{file_id}.{ext}"
+        media_exists, media_info = check_file_exists(
+            QINIU_BUCKET_NAME, media_filename)
+
+        if media_exists:
+            logger.info(f"找到媒体文件: {media_filename}")
+            media_url = f"http://{QINIU_DOMAIN}/{media_filename}"
+            qrcode_url = f"http://{QINIU_DOMAIN}/{qrcode_filename}"
+
+            return {
+                'filename': f"file.{ext}",
+                'file_extension': ext,
+                'media_url': media_url,
+                'qrcode_url': qrcode_url,
+                'is_video': ext in {'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'}
+            }
+
+    logger.warning(f"未找到文件ID {file_id} 对应的媒体文件")
+    return None
 
 
 @app.route('/')
@@ -186,19 +234,6 @@ def upload_file():
             logger.error(f"二维码上传失败: {qr_result}")
             return jsonify({'error': f'二维码上传失败: {qr_result}'}), 500
 
-        # 存储文件信息
-        file_info = {
-            'filename': original_filename,
-            'file_extension': file_extension,
-            'media_url': result,  # 基础URL
-            'qrcode_url': qr_result,  # 基础URL
-            'is_video': is_video_file(original_filename),
-            'upload_time': datetime.now().isoformat()
-        }
-        file_info_storage[file_id] = file_info
-        logger.info(f"文件信息已存储: {file_info}")
-        logger.info(f"当前存储的文件数量: {len(file_info_storage)}")
-
         # 清理本地文件
         os.remove(local_file_path)
         os.remove(qrcode_local_path)
@@ -235,12 +270,12 @@ def upload_file():
 def get_media_info(file_id):
     """获取媒体文件信息"""
     logger.info(f"收到获取媒体信息请求，文件ID: {file_id}")
-    logger.info(f"当前存储的文件ID列表: {list(file_info_storage.keys())}")
 
     try:
-        # 从存储中获取文件信息
-        if file_id in file_info_storage:
-            file_info = file_info_storage[file_id]
+        # 直接根据文件ID查找文件
+        file_info = find_file_by_id(file_id)
+
+        if file_info:
             logger.info(f"找到文件信息: {file_info}")
 
             # 生成私有bucket的签名URL
@@ -259,9 +294,8 @@ def get_media_info(file_id):
             logger.info(f"返回媒体信息: {response_data}")
             return jsonify(response_data)
         else:
-            # 如果找不到文件信息，返回错误
+            # 如果找不到文件，返回错误
             logger.warning(f"文件ID {file_id} 不存在")
-            logger.info(f"可用的文件ID: {list(file_info_storage.keys())}")
             return jsonify({
                 'file_id': file_id,
                 'exists': False,
