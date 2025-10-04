@@ -20,9 +20,13 @@
         border-radius: 15px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
         padding: 30px;
-        max-width: 90vw;
-        max-height: 90vh;
+        max-width: calc(100vw - 40px);
+        max-height: calc(100vh - 40px);
         text-align: center;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        margin: 20px;
       }
       .loading {
         display: flex;
@@ -48,18 +52,51 @@
       }
       .media-player {
         width: 100%;
-        max-width: 800px;
+        max-width: 90vw;
+        max-height: 70vh;
         border-radius: 10px;
         box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        object-fit: contain;
       }
       .media-player img {
         max-width: 100%;
+        max-height: 70vh;
+        width: auto;
         height: auto;
         border-radius: 10px;
+        object-fit: contain;
+        cursor: zoom-in;
       }
       .media-player video {
         width: 100%;
+        max-height: 70vh;
         border-radius: 10px;
+        object-fit: contain;
+      }
+      .media-player img:hover {
+        transform: scale(1.02);
+        transition: transform 0.3s ease;
+      }
+      .image-zoomed {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        cursor: zoom-out;
+      }
+      .image-zoomed img {
+        max-width: 95vw;
+        max-height: 95vh;
+        object-fit: contain;
+        border-radius: 0;
+        box-shadow: none;
+        transform: none !important;
       }
       .error {
         color: #e74c3c;
@@ -119,8 +156,16 @@
       }
       @media (max-width: 768px) {
         .player-container {
-          margin: 20px;
-          padding: 20px;
+          margin: 15px;
+          padding: 15px;
+          max-width: calc(100vw - 30px);
+          max-height: calc(100vh - 30px);
+        }
+        .media-player img {
+          max-height: 60vh;
+        }
+        .media-player video {
+          max-height: 60vh;
         }
         .controls {
           flex-direction: column;
@@ -211,7 +256,7 @@
                 `;
         } else {
           mediaContainer.innerHTML = `
-                    <img class="media-player" src="${mediaUrl}" alt="图片预览" />
+                    <img class="media-player" src="${mediaUrl}" alt="图片预览" onclick="toggleImageZoom(this)" />
                 `;
           fileInfo.innerHTML = `
                     <h3>图片查看器</h3>
@@ -257,6 +302,42 @@
           document.body.removeChild(link);
         }
       }
+
+      function toggleImageZoom(imgElement) {
+        const currentZoomed = document.querySelector(".image-zoomed");
+        if (currentZoomed) {
+          // 如果已经放大了，则关闭
+          currentZoomed.remove();
+          document.body.style.overflow = "auto";
+        } else {
+          // 创建放大视图
+          const zoomedDiv = document.createElement("div");
+          zoomedDiv.className = "image-zoomed";
+          zoomedDiv.onclick = function () {
+            zoomedDiv.remove();
+            document.body.style.overflow = "auto";
+          };
+
+          const zoomedImg = document.createElement("img");
+          zoomedImg.src = imgElement.src;
+          zoomedImg.alt = imgElement.alt;
+
+          zoomedDiv.appendChild(zoomedImg);
+          document.body.appendChild(zoomedDiv);
+          document.body.style.overflow = "hidden";
+        }
+      }
+
+      // 添加键盘支持
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+          const currentZoomed = document.querySelector(".image-zoomed");
+          if (currentZoomed) {
+            currentZoomed.remove();
+            document.body.style.overflow = "auto";
+          }
+        }
+      });
 
       // 页面加载完成后开始加载媒体
       document.addEventListener("DOMContentLoaded", loadMedia);
